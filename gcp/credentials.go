@@ -2,16 +2,12 @@ package gcp
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"io/ioutil"
-	"strings"
 
 	"impractical.co/credentials"
 
-	kms "cloud.google.com/go/kms/apiv1"
-	"cloud.google.com/go/storage"
-	kmspb "google.golang.org/genproto/googleapis/cloud/kms/v1"
+	secretmanager "cloud.google.com/go/secretmanager/apiv1beta1"
+	secretmanagerpb "google.golang.org/genproto/googleapis/cloud/secretmanager/v1beta1"
 )
 
 var (
@@ -20,105 +16,55 @@ var (
 )
 
 type Credentials struct {
-	StorageBucket string
-	KMSKey        struct {
-		Project string
-		RingID  string
-		KeyID   string
-	}
-
+	Project string
+	Version string
 	// TODO: auth options
 }
 
-func (c Credentials) newStorageClient(ctx context.Context) (*storage.Client, error) {
+func (c Credentials) newSecretClient(ctx context.Context) (*secretmanager.Client, error) {
 	// TODO: support other auth options
-	return storage.NewClient(ctx)
-}
-
-func (c Credentials) newKMSClient(ctx context.Context) (*kms.KeyManagementClient, error) {
-	// TODO: support other auth options
-	return kms.NewKeyManagementClient(ctx)
+	return secretmanager.NewClient(ctx)
 }
 
 func (c Credentials) Get(ctx context.Context, id string) ([]byte, error) {
-	storageClient, err := c.newStorageClient(ctx)
+	client, err := c.newSecretClient(ctx)
 	if err != nil {
 		// TODO: better error handling
 		return nil, err
 	}
-	bucket := storageClient.Bucket(c.StorageBucket)
-	object := bucket.Object(id)
-	rc, err := object.NewReader(ctx)
-	if err != nil {
-		// TODO: better error handling
-		return nil, err
+	version := "latest"
+	if c.Version != "" {
+		version = c.Version
 	}
-	cipherBytes, err := ioutil.ReadAll(rc)
-	rc.Close()
-	if err != nil {
-		// TODO: better error handling
-		return nil, err
+	name := fmt.Sprintf("projects/%s/secrets/%s/versions/%s", c.Project, id, version)
+	req := &secretmanagerpb.AccessSecretVersionRequest{
+		Name: name,
 	}
 
-	cipherb64 := strings.TrimSpace(string(cipherBytes))
-
-	ciphertext, err := base64.StdEncoding.DecodeString(cipherb64)
+	result, err := client.AccessSecretVersion(ctx, req)
 	if err != nil {
 		// TODO: better error handling
 		return nil, err
 	}
-	kmsClient, err := c.newKMSClient(ctx)
-	if err != nil {
-		// TODO: better error handling
-		return nil, err
-	}
-
-	req := &kmspb.DecryptRequest{
-		Name:       fmt.Sprintf("projects/%s/locations/global/keyRings/%s/cryptoKeys/%s", c.KMSKey.Project, c.KMSKey.RingID, c.KMSKey.KeyID),
-		Ciphertext: ciphertext,
-	}
-
-	resp, err := kmsClient.Decrypt(ctx, req)
-	if err != nil {
-		// TODO: better error handling
-		return nil, err
-	}
-	return resp.Plaintext, nil
+	return result.Payload.Data, nil
 }
 
 func (c Credentials) Set(ctx context.Context, id string, plaintext []byte) error {
-	kmsClient, err := c.newKMSClient(ctx)
-	if err != nil {
-		// TODO: better error handling
-		return err
-	}
-	storageClient, err := c.newStorageClient(ctx)
+	client, err := c.newSecretClient(ctx)
 	if err != nil {
 		// TODO: better error handling
 		return err
 	}
 
-	req := &kmspb.EncryptRequest{
-		Name:      fmt.Sprintf("projects/%s/locations/global/keyRings/%s/cryptoKeys/%s", c.KMSKey.Project, c.KMSKey.RingID, c.KMSKey.KeyID),
-		Plaintext: plaintext,
+	parent := fmt.Sprintf("projects/%s/secrets/%s", c.Project, id)
+	req := &secretmanagerpb.AddSecretVersionRequest{
+		Parent: parent,
+		Payload: &secretmanagerpb.SecretPayload{
+			Data: plaintext,
+		},
 	}
-	resp, err := kmsClient.Encrypt(ctx, req)
-	if err != nil {
-		// TODO: better error handling
-		return err
-	}
-	cipherb64 := base64.StdEncoding.EncodeToString(resp.Ciphertext)
 
-	bucket := storageClient.Bucket(c.StorageBucket)
-	object := bucket.Object(id)
-	w := object.NewWriter(ctx)
-
-	_, err = fmt.Fprintf(w, cipherb64)
-	if err != nil {
-		// TODO: better error handling
-		return err
-	}
-	err = w.Close()
+	_, err = client.AddSecretVersion(ctx, req)
 	if err != nil {
 		// TODO: better error handling
 		return err
