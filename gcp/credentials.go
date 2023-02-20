@@ -6,30 +6,46 @@ import (
 
 	"impractical.co/credentials"
 
-	secretmanager "cloud.google.com/go/secretmanager/apiv1beta1"
-	secretmanagerpb "google.golang.org/genproto/googleapis/cloud/secretmanager/v1beta1"
+	secretmanager "cloud.google.com/go/secretmanager/apiv1"
+	secretmanagerpb "google.golang.org/genproto/googleapis/cloud/secretmanager/v1"
 )
 
 var (
-	_ credentials.Accessor = Credentials{}
-	_ credentials.Setter   = Credentials{}
+	_ credentials.Accessor = &Credentials{}
+	_ credentials.Setter   = &Credentials{}
+	_ credentials.Initer   = &Credentials{}
+	_ credentials.Closer   = &Credentials{}
 )
 
 type Credentials struct {
 	Project string
 	Version string
 	// TODO: auth options
+
+	client *secretmanager.Client
 }
 
-func (c Credentials) newSecretClient(ctx context.Context) (*secretmanager.Client, error) {
+func (c *Credentials) newSecretClient(ctx context.Context) (*secretmanager.Client, error) {
+	if c.client != nil {
+		return c.client, nil
+	}
 	// TODO: support other auth options
-	return secretmanager.NewClient(ctx)
+	client, err := secretmanager.NewClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.client = client
+	return c.client, nil
 }
 
-func (c Credentials) Get(ctx context.Context, id string) ([]byte, error) {
+func (c *Credentials) Init(ctx context.Context) error {
+	_, err := c.newSecretClient(ctx)
+	return err
+}
+
+func (c *Credentials) Get(ctx context.Context, id string) ([]byte, error) {
 	client, err := c.newSecretClient(ctx)
 	if err != nil {
-		// TODO: better error handling
 		return nil, err
 	}
 	version := "latest"
@@ -43,16 +59,14 @@ func (c Credentials) Get(ctx context.Context, id string) ([]byte, error) {
 
 	result, err := client.AccessSecretVersion(ctx, req)
 	if err != nil {
-		// TODO: better error handling
 		return nil, err
 	}
 	return result.Payload.Data, nil
 }
 
-func (c Credentials) Set(ctx context.Context, id string, plaintext []byte) error {
+func (c *Credentials) Set(ctx context.Context, id string, plaintext []byte) error {
 	client, err := c.newSecretClient(ctx)
 	if err != nil {
-		// TODO: better error handling
 		return err
 	}
 
@@ -66,8 +80,14 @@ func (c Credentials) Set(ctx context.Context, id string, plaintext []byte) error
 
 	_, err = client.AddSecretVersion(ctx, req)
 	if err != nil {
-		// TODO: better error handling
 		return err
 	}
 	return nil
+}
+
+func (c *Credentials) Close(_ context.Context) error {
+	if c.client == nil {
+		return nil
+	}
+	return c.client.Close()
 }

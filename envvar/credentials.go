@@ -10,7 +10,6 @@ import (
 
 var (
 	_ credentials.Accessor = Credentials{}
-	_ credentials.Setter   = Credentials{}
 )
 
 type Credentials struct {
@@ -22,8 +21,4 @@ func (c Credentials) Get(ctx context.Context, id string) ([]byte, error) {
 		return []byte(v), nil
 	}
 	return nil, fmt.Errorf("env var %q not set", c.Prefix+id)
-}
-
-func (c Credentials) Set(ctx context.Context, id string, plaintext []byte) error {
-	return fmt.Errorf("setting credentials is not supported")
 }
