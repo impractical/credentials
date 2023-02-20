@@ -23,8 +23,8 @@ func (c Credentials) Get(ctx context.Context, id string) ([]byte, error) {
 	if c.CoerceUpper {
 		env = strings.ToUpper(env)
 	}
-	if v := os.Getenv(c.Prefix + id); v != "" {
+	if v := os.Getenv(env); v != "" {
 		return []byte(v), nil
 	}
-	return nil, fmt.Errorf("env var %q not set", c.Prefix+id)
+	return nil, fmt.Errorf("env var %q not set", env)
 }
